@@ -9,14 +9,18 @@ from urllib.parse import parse_qs, urlparse
 from .domain import Actor, DomainError, PermissionDenied, ValidationError
 
 
-RECORD_RE = re.compile(r"^/api/records/(\d+)$")
-ACTION_RE = re.compile(r"^/api/records/(\d+)/actions/([a-z_]+)$")
-AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
+LOT_RE = re.compile(r"^/api/lots/(\d+)$")
+LOT_ACTION_RE = re.compile(r"^/api/lots/(\d+)/actions/([a-z_]+)$")
+REQUEST_RE = re.compile(r"^/api/requests/(\d+)$")
+REQUEST_ACTION_RE = re.compile(r"^/api/requests/(\d+)/actions/([a-z_]+)$")
+ALLOCATION_ACTION_RE = re.compile(r"^/api/allocations/(\d+)/actions/([a-z_]+)$")
+CASUALTY_TRAIL_RE = re.compile(r"^/api/casualties/([0-9A-Za-z_-]+)/trail$")
+RECORD_AUDIT_RE = re.compile(r"^/api/records/(\d+)/audit$")
 
 
 def make_handler(service: Any, static_dir: Path):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "hospital-surge/1.0"
+        server_version = "blood-desk/1.0"
 
         def log_message(self, fmt: str, *args: Any) -> None:
             return
@@ -61,26 +65,51 @@ def make_handler(service: Any, static_dir: Path):
             else:
                 self._send(500, {"error": "internal_error", "message": "服务内部错误"})
 
+        @staticmethod
+        def _expected_version(body: Dict[str, Any]) -> int:
+            version = body.get("expected_version")
+            if not isinstance(version, int):
+                raise ValidationError("expected_version必须是整数")
+            return version
+
         def do_GET(self) -> None:
             try:
                 parsed = urlparse(self.path)
+                query = parse_qs(parsed.query)
+                limit = int(query.get("limit", ["100"])[0])
+                state = query.get("state", [None])[0]
                 if parsed.path == "/health":
-                    self._send(200, {"status": "ok", "service": "hospital-surge", "database": service.repository.health()})
+                    self._send(200, {"status": "ok", "service": "blood-desk", "database": service.repository.health()})
                     return
                 if parsed.path == "/":
                     page = (static_dir / "index.html").read_bytes()
                     self._send(200, page, "text/html; charset=utf-8")
                     return
-                if parsed.path == "/api/records":
-                    query = parse_qs(parsed.query)
-                    records = service.list_records(self._actor(), state=query.get("state", [None])[0], limit=int(query.get("limit", ["100"])[0]))
-                    self._send(200, {"items": records})
+                if parsed.path == "/api/lots":
+                    self._send(200, {"items": service.list_lots(self._actor(), state=state, limit=limit)})
                     return
-                match = RECORD_RE.match(parsed.path)
+                match = LOT_RE.match(parsed.path)
                 if match:
-                    self._send(200, service.get_record(self._actor(), int(match.group(1))))
+                    self._send(200, service.lot_detail(self._actor(), int(match.group(1))))
                     return
-                match = AUDIT_RE.match(parsed.path)
+                if parsed.path == "/api/requests":
+                    self._send(200, {"items": service.list_requests(self._actor(), state=state, limit=limit)})
+                    return
+                match = REQUEST_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.request_detail(self._actor(), int(match.group(1))))
+                    return
+                if parsed.path == "/api/allocations":
+                    request_id = query.get("request_id", [None])[0]
+                    self._send(200, {"items": service.list_allocations(
+                        self._actor(), state=state, casualty_ref=query.get("casualty", [None])[0],
+                        request_id=int(request_id) if request_id else None, limit=limit)})
+                    return
+                match = CASUALTY_TRAIL_RE.match(parsed.path)
+                if match:
+                    self._send(200, service.casualty_trail(self._actor(), match.group(1)))
+                    return
+                match = RECORD_AUDIT_RE.match(parsed.path)
                 if match:
                     self._send(200, {"items": service.timeline(self._actor(), int(match.group(1)))})
                     return
@@ -95,16 +124,28 @@ def make_handler(service: Any, static_dir: Path):
             try:
                 parsed = urlparse(self.path)
                 body = self._body()
-                if parsed.path == "/api/records":
-                    record = service.create(self._actor(), body.get("reference", ""), body.get("data", {}))
-                    self._send(201, record)
+                if parsed.path == "/api/lots":
+                    self._send(201, service.register_lot(self._actor(), body.get("reference", ""), body.get("data", {})))
                     return
-                match = ACTION_RE.match(parsed.path)
+                if parsed.path == "/api/requests":
+                    self._send(201, service.create_request(self._actor(), body.get("reference", ""), body.get("data", {})))
+                    return
+                match = LOT_ACTION_RE.match(parsed.path)
                 if match:
-                    version = body.get("expected_version")
-                    if not isinstance(version, int):
-                        raise ValidationError("expected_version必须是整数")
-                    record = service.act(self._actor(), int(match.group(1)), version, match.group(2), body.get("data", {}))
+                    record = service.lot_action(self._actor(), int(match.group(1)), match.group(2),
+                                                self._expected_version(body), body.get("data", {}))
+                    self._send(200, record)
+                    return
+                match = REQUEST_ACTION_RE.match(parsed.path)
+                if match:
+                    record = service.request_action(self._actor(), int(match.group(1)), match.group(2),
+                                                    self._expected_version(body), body.get("data", {}))
+                    self._send(200, record)
+                    return
+                match = ALLOCATION_ACTION_RE.match(parsed.path)
+                if match:
+                    record = service.allocation_action(self._actor(), int(match.group(1)), match.group(2),
+                                                       self._expected_version(body), body.get("data", {}))
                     self._send(200, record)
                     return
                 self._send(404, {"error": "not_found", "message": "路径不存在"})

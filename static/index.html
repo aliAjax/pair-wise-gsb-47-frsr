@@ -3,31 +3,172 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>群体伤亡医院应急扩容协调</title>
+  <title>血液调剂台</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
-    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 1.5rem; color: #17212b; background: #fafbfc; }
+    main { max-width: 1100px; margin: auto; }
+    section { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1.2rem; }
+    h1 { font-size: 1.4rem; } h2 { font-size: 1.05rem; margin-top: 0; }
+    label { display: inline-block; margin: .25rem .4rem .25rem 0; font-size: .85rem; color: #445; }
+    input, select { padding: .35rem .45rem; border: 1px solid #c9d2dc; border-radius: 6px; font-size: .9rem; }
+    input[type=number] { width: 6rem; }
+    button { padding: .45rem .85rem; cursor: pointer; border: 1px solid #b8c4d0; background: #f4f7fa; border-radius: 6px; }
+    button:hover { background: #e8eef4; }
+    table { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: .5rem; }
+    th, td { border: 1px solid #e3e8ee; padding: .35rem .5rem; text-align: left; }
+    th { background: #f4f6f8; }
+    pre { background: #f4f6f8; padding: .8rem; overflow: auto; border-radius: 8px; font-size: .8rem; max-height: 320px; }
+    .reserved { color: #0a6; } .pending { color: #c80; } .issued { color: #06c; } .released, .expired { color: #999; }
   </style>
 </head>
 <body>
 <main>
-  <h1>群体伤亡医院应急扩容协调</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <h1>血液调剂台</h1>
+
+  <section>
+    <h2>血袋登记（医院）</h2>
+    <div>
+      <label>批次号 <input id="lot-ref" value="LOT-1001"></label>
+      <label>医院 <input id="lot-hospital" value="城北医院"></label>
+      <label>血型 <select id="lot-bt"></select></label>
+      <label>成分 <select id="lot-comp"></select></label>
+      <label>效期 <input id="lot-exp" type="datetime-local"></label>
+      <label>可调剂数量 <input id="lot-qty" type="number" value="4" min="1"></label>
+      <label>纬度 <input id="lot-lat" type="number" step="0.0001" value="30.66"></label>
+      <label>经度 <input id="lot-lng" type="number" step="0.0001" value="104.06"></label>
+      <button id="lot-submit">登记</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>伤员用血登记</h2>
+    <div>
+      <label>需求号 <input id="req-ref" value="REQ-2001"></label>
+      <label>伤员编号 <input id="req-cas" value="CAS-301"></label>
+      <label>血型 <select id="req-bt"></select></label>
+      <label>成分 <select id="req-comp"></select></label>
+      <label>用量(单位) <input id="req-units" type="number" value="2" min="1"></label>
+      <label>纬度 <input id="req-lat" type="number" step="0.0001" value="30.67"></label>
+      <label>经度 <input id="req-lng" type="number" step="0.0001" value="104.07"></label>
+      <button id="req-submit">登记并匹配</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>库存 / 需求 / 调剂单 <button id="refresh">刷新</button></h2>
+    <h3>血袋库存</h3><div id="lots"></div>
+    <h3>用血需求</h3><div id="requests"></div>
+    <h3>调剂单</h3><div id="allocations"></div>
+  </section>
+
+  <section>
+    <h2>伤员调剂去向</h2>
+    <label>伤员编号 <input id="trail-cas" value="CAS-301"></label>
+    <button id="trail-submit">查询</button>
+    <pre id="trail-output">查询结果展示在这里。</pre>
+  </section>
+
+  <section>
+    <h2>操作输出</h2>
+    <pre id="output">—</pre>
+  </section>
 </main>
 <script>
 const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const BLOOD_TYPES = ["O-","O+","A-","A+","B-","B+","AB-","AB+"];
+const COMPONENTS = [["whole_blood","全血"],["rbc","红细胞"],["plasma","血浆"],["platelets","血小板"],["cryo","冷沉淀"]];
+const STATE_LABEL = {registered:"在库",expired:"已过期",closed:"已关闭",requested:"待匹配",matched:"已匹配",fulfilled:"已满足",cancelled:"已取消",reserved:"已占用",pending:"留待确认",issued:"已实发",released:"已释放"};
+for (const id of ["lot-bt","req-bt"]) {
+  document.getElementById(id).innerHTML = BLOOD_TYPES.map(t => `<option>${t}</option>`).join("");
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+for (const id of ["lot-comp","req-comp"]) {
+  document.getElementById(id).innerHTML = COMPONENTS.map(([v,l]) => `<option value="${v}">${l}</option>`).join("");
+}
+const tomorrow = new Date(Date.now() + 2*864e5);
+document.getElementById("lot-exp").value = tomorrow.toISOString().slice(0,16);
+
+function show(data) { document.getElementById("output").textContent = JSON.stringify(data, null, 2); }
+async function call(path, options) {
+  const response = await fetch(path, {headers, ...options});
+  const data = await response.json();
+  if (!response.ok) show(data);
+  return data;
+}
+async function post(path, body) {
+  return call(path, {method:"POST", headers:{...headers,"Content-Type":"application/json"}, body:JSON.stringify(body)});
+}
+function num(id) { const v = document.getElementById(id).value; return v === "" ? null : Number(v); }
+function val(id) { return document.getElementById(id).value; }
+
+document.getElementById("lot-submit").onclick = async () => {
+  const data = {hospital: val("lot-hospital"), blood_type: val("lot-bt"), component: val("lot-comp"),
+    expires_at: val("lot-exp"), quantity: num("lot-qty"), lat: num("lot-lat"), lng: num("lot-lng")};
+  show(await post("/api/lots", {reference: val("lot-ref"), data}));
+  refresh();
+};
+document.getElementById("req-submit").onclick = async () => {
+  const data = {casualty_ref: val("req-cas"), blood_type: val("req-bt"), component: val("req-comp"),
+    units: num("req-units"), lat: num("req-lat"), lng: num("req-lng")};
+  show(await post("/api/requests", {reference: val("req-ref"), data}));
+  refresh();
+};
+document.getElementById("trail-submit").onclick = async () => {
+  const data = await call("/api/casualties/" + encodeURIComponent(val("trail-cas")) + "/trail");
+  document.getElementById("trail-output").textContent = JSON.stringify(data, null, 2);
+};
+
+function table(rows, columns) {
+  if (!rows.length) return "<p>暂无记录。</p>";
+  const head = columns.map(c => `<th>${c[0]}</th>`).join("");
+  const body = rows.map(r => "<tr>" + columns.map(c => `<td>${c[1](r)}</td>`).join("") + "</tr>").join("");
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+const esc = v => (v === null || v === undefined || v === "") ? "—" : String(v);
+const stateTag = s => `<span class="${s}">${STATE_LABEL[s] || s}</span>`;
+
+async function allocAction(id, version, action) {
+  show(await post(`/api/allocations/${id}/actions/${action}`, {expected_version: version, data: {}}));
+  refresh();
+}
+
+async function refresh() {
+  const lots = (await call("/api/lots?limit=100")).items || [];
+  const requests = (await call("/api/requests?limit=100")).items || [];
+  const allocations = (await call("/api/allocations?limit=100")).items || [];
+  document.getElementById("lots").innerHTML = table(lots, [
+    ["批次", l => esc(l.reference)], ["医院", l => esc(l.payload.hospital)],
+    ["血型/成分", l => `${l.payload.blood_type} / ${l.payload.component}`],
+    ["效期", l => esc(l.payload.expires_at)],
+    ["可调剂/预留/实发/总量", l => `${l.payload.quantity_available} / ${l.payload.quantity_reserved} / ${l.payload.quantity_issued} / ${l.payload.quantity_total}`],
+    ["状态", l => stateTag(l.state)],
+  ]);
+  document.getElementById("requests").innerHTML = table(requests, [
+    ["需求号", r => esc(r.reference)], ["伤员", r => esc(r.payload.casualty_ref)],
+    ["血型/成分", r => `${r.payload.blood_type} / ${r.payload.component}`],
+    ["需/占/发/待", r => `${r.payload.units_needed} / ${r.payload.units_reserved} / ${r.payload.units_issued} / ${r.payload.units_pending}`],
+    ["状态", r => stateTag(r.state)],
+  ]);
+  document.getElementById("allocations").innerHTML = table(allocations, [
+    ["单号", a => esc(a.reference)], ["伤员", a => esc(a.payload.casualty_ref)],
+    ["供血医院", a => esc(a.payload.hospital)],
+    ["血型/成分", a => `${a.payload.blood_type} / ${a.payload.component}`],
+    ["单位", a => a.payload.units], ["距离km", a => esc(a.payload.distance_km)],
+    ["状态", a => stateTag(a.state)],
+    ["操作", a => {
+      const b = [];
+      if (a.state === "reserved") {
+        b.push(`<button onclick='allocAction(${a.id},${a.version},"issue")'>实发</button>`);
+        b.push(`<button onclick='allocAction(${a.id},${a.version},"cancel")'>取消</button>`);
+      } else if (a.state === "pending") {
+        b.push(`<button onclick='allocAction(${a.id},${a.version},"confirm")'>确认</button>`);
+        b.push(`<button onclick='allocAction(${a.id},${a.version},"cancel")'>取消</button>`);
+      }
+      return b.join(" ") || "—";
+    }],
+  ]);
+}
+document.getElementById("refresh").onclick = refresh;
+refresh();
 </script>
 </body>
 </html>
