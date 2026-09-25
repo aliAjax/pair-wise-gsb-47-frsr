@@ -6,6 +6,6 @@
   "projectForm": "完整项目",
   "codeScope": "backend, frontend",
   "languages": ["Python", "HTML", "CSS", "JavaScript"],
-  "summary": "群体伤亡医院应急扩容协调服务，覆盖伤员资源需求、容量分流和冲突检查。",
+  "summary": "血液调剂台：医院血袋登记、伤员用血匹配（相容血型/效期/距离）、抢批留待确认、实发扣库与取消超时释放、重启后伤员调剂溯源。",
   "containerized": false
 }

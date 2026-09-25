@@ -1,33 +1,270 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>群体伤亡医院应急扩容协调</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
-    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>血液调剂台</title>
+<style>
+  :root { --line:#d8dee6; --bg:#f4f6f8; --ink:#17212b; --muted:#5c6b7a; --blue:#1d5fd0; --red:#c0392b; --green:#1e8a4c; --amber:#b9770e; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; color: var(--ink); background: var(--bg); }
+  header { background: #10243f; color: #fff; padding: .9rem 1.5rem; display:flex; align-items:center; gap:1rem; flex-wrap: wrap; }
+  header h1 { font-size: 1.15rem; margin: 0; }
+  header .meta { color: #a9bfd8; font-size: .85rem; }
+  main { max-width: 1180px; margin: 1.2rem auto; padding: 0 1rem 3rem; }
+  nav { display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:1rem; }
+  nav button { border:1px solid var(--line); background:#fff; padding:.5rem 1rem; border-radius: 8px 8px 0 0; cursor:pointer; }
+  nav button.active { background: var(--blue); color:#fff; border-color: var(--blue); }
+  .grid { display:grid; grid-template-columns: 340px 1fr; gap:1rem; align-items:start; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:1rem; }
+  .card h2 { font-size:1rem; margin:0 0 .8rem; }
+  label { display:block; font-size:.82rem; color:var(--muted); margin:.55rem 0 .15rem; }
+  input, select { width:100%; padding:.45rem .55rem; border:1px solid var(--line); border-radius:6px; font-size:.9rem; }
+  button.primary { margin-top:.9rem; width:100%; padding:.55rem; background:var(--blue); color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:.95rem; }
+  button.small { padding:.25rem .6rem; font-size:.8rem; border-radius:5px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.ship { color:var(--green); border-color:var(--green); }
+  button.cancel { color:var(--red); border-color:var(--red); }
+  table { border-collapse: collapse; width:100%; font-size:.86rem; background:#fff; }
+  th, td { border-bottom:1px solid var(--line); padding:.45rem .5rem; text-align:left; vertical-align: top; }
+  th { background:#eef2f7; position:sticky; top:0; }
+  .tag { display:inline-block; padding:.05rem .45rem; border-radius:999px; font-size:.76rem; }
+  .tag.held { background:#fff3cd; color:var(--amber); }
+  .tag.shipped { background:#d5f5e3; color:var(--green); }
+  .tag.pending { background:#dce9fb; color:var(--blue); }
+  .tag.cancelled, .tag.timed_out { background:#eee; color:#888; }
+  .tag.expired { background:#fadbd8; color:var(--red); }
+  .muted { color:var(--muted); font-size:.82rem; }
+  .toast { position:fixed; right:1.2rem; bottom:1.2rem; background:#10243f; color:#fff; padding:.6rem .9rem; border-radius:8px; font-size:.86rem; opacity:0; transition:opacity .25s; max-width:360px; }
+  .toast.show { opacity:1; }
+  .toast.err { background:var(--red); }
+  .pillrow { display:flex; gap:.4rem; align-items:center; margin-bottom:.6rem; flex-wrap:wrap; }
+  pre { background:#0e1b2c; color:#d6e4f5; padding:.8rem; border-radius:8px; overflow:auto; font-size:.78rem; max-height: 420px; }
+  .stat { display:inline-block; background:#eef2f7; border-radius:8px; padding:.4rem .7rem; margin:.2rem .4rem .2rem 0; font-size:.82rem; }
+  .tab { display:none; } .tab.active { display:block; }
+  @media (max-width: 860px){ .grid{ grid-template-columns:1fr; } }
+</style>
 </head>
 <body>
+<header>
+  <h1>🩸 血液调剂台</h1>
+  <span class="meta">相容血型 · 效期(FEFO) · 距离 匹配 ／ 抢占后提交留待确认 ／ 实发才扣库 ／ 取消·超时释放</span>
+</header>
 <main>
-  <h1>群体伤亡医院应急扩容协调</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <nav>
+    <button data-tab="desk" class="active">调剂总览</button>
+    <button data-tab="hospital">医院与血袋登记</button>
+    <button data-tab="casualty">伤员与用血请求</button>
+    <button data-tab="trace">伤员调剂去向</button>
+  </nav>
+
+  <!-- 总览 -->
+  <section id="tab-desk" class="tab active">
+    <div class="pillrow">
+      <span id="stats"></span>
+      <button class="small" onclick="sweep()">超时/过期清扫</button>
+      <button class="small" onclick="loadAll()">刷新</button>
+      <label class="muted" style="margin:0"><input type="checkbox" id="autoref" style="width:auto" checked> 5秒自动刷新</label>
+    </div>
+    <div class="card">
+      <h2>用血请求（按提交先后）</h2>
+      <table id="requests-table"><thead><tr>
+        <th>#</th><th>伤员</th><th>血型/成分</th><th>需求</th><th>状态</th><th>锁定明细 / 去向</th><th>操作</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <h2>血袋库存</h2>
+      <table id="inventory-table"><thead><tr>
+        <th>批次</th><th>医院</th><th>血型</th><th>成分</th><th>效期</th><th>在库</th><th>已占用</th><th>可调剂</th><th>距离km</th><th></th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- 医院/血袋 -->
+  <section id="tab-hospital" class="tab">
+    <div class="grid">
+      <div class="card">
+        <h2>登记医院</h2>
+        <label>医院名称</label><input id="h-name" placeholder="如：市第一人民医院">
+        <label>到事故点距离(km)</label><input id="h-dist" type="number" step="0.1" value="10">
+        <button class="primary" onclick="addHospital()">登记医院</button>
+        <h2 style="margin-top:1.4rem">登记血袋批次</h2>
+        <label>所属医院</label><select id="b-hospital"></select>
+        <label>血型</label><select id="b-type"></select>
+        <label>成分</label><select id="b-component"><option>红细胞</option><option>血浆</option><option>血小板</option></select>
+        <label>效期 (YYYY-MM-DD，过期血袋不能进候选)</label><input id="b-exp" type="date">
+        <label>可调剂数量(袋)</label><input id="b-qty" type="number" min="1" value="4">
+        <button class="primary" onclick="addBatch()">登记血袋</button>
+      </div>
+      <div class="card">
+        <h2>已登记医院</h2>
+        <table id="hospitals-table"><thead><tr><th>#</th><th>编号</th><th>名称</th><th>距离km</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 伤员/请求 -->
+  <section id="tab-casualty" class="tab">
+    <div class="grid">
+      <div class="card">
+        <h2>登记伤员</h2>
+        <label>姓名/编号</label><input id="c-name" placeholder="如：伤员-017">
+        <label>血型</label><select id="c-type"></select>
+        <button class="primary" onclick="addCasualty()">登记伤员</button>
+        <h2 style="margin-top:1.4rem">提交用血请求</h2>
+        <label>伤员</label><select id="r-casualty"></select>
+        <label>所需血型</label><select id="r-type"></select>
+        <label>成分</label><select id="r-component"><option>红细胞</option><option>血浆</option><option>血小板</option></select>
+        <label>用量(袋)</label><input id="r-qty" type="number" min="1" value="2">
+        <button class="primary" onclick="addRequest()">提交并匹配</button>
+        <p class="muted" style="margin-top:.8rem">库存足够→整体锁定(held)等待实发；不足或与他人撞批→排队(pending)，不占用任何血袋。</p>
+      </div>
+      <div class="card">
+        <h2>伤员名单</h2>
+        <table id="casualties-table"><thead><tr><th>#</th><th>编号</th><th>姓名</th><th>血型</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 溯源 -->
+  <section id="tab-trace" class="tab">
+    <div class="card">
+      <h2>沿伤员查询调剂去向（重启后仍可查）</h2>
+      <div class="pillrow">
+        <select id="t-casualty" style="max-width:260px"></select>
+        <button class="small" onclick="trace()">查询</button>
+      </div>
+      <pre id="trace-out">选择伤员后点击查询。</pre>
+    </div>
+  </section>
 </main>
+<div id="toast" class="toast"></div>
+
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const H = { "X-User-Id": "desk-operator", "X-Role": "admin", "X-Org": "blood-desk" };
+const BLOOD_TYPES = ["O-","O+","A-","A+","B-","B+","AB-","AB+"];
+let hospitals = [], casualties = [];
+
+function toast(msg, isErr){ const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast show' + (isErr?' err':''); setTimeout(()=>t.className='toast', 3200); }
+async function api(path, opts){
+  const res = await fetch(path, Object.assign({headers:Object.assign({}, H, opts&&opts.body?{'Content-Type':'application/json'}:{})}, opts));
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.message || ('HTTP '+res.status));
+  return data;
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function fillBlood(sel){ sel.innerHTML = BLOOD_TYPES.map(t=>`<option>${t}</option>`).join(''); }
+document.querySelectorAll('select').forEach(s => { if(s.id.endsWith('-type')) fillBlood(s); });
+
+document.querySelectorAll('nav button').forEach(btn => btn.onclick = () => {
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+  loadAll();
+});
+
+async function addHospital(){
+  try{
+    await api('/api/hospitals',{method:'POST',body:JSON.stringify({name:h_name.value.trim(),distance_km:Number(h_dist.value)})});
+    h_name.value=''; toast('医院已登记'); loadAll();
+  }catch(e){ toast(e.message,true); }
+}
+async function addBatch(){
+  try{
+    const hid = b_hospital.value; if(!hid) throw new Error('请先登记并选择医院');
+    await api(`/api/hospitals/${hid}/batches`,{method:'POST',body:JSON.stringify({
+      blood_type:b_type.value, component:b_component.value, expires_on:b_exp.value, quantity:Number(b_qty.value)})});
+    toast('血袋已登记'); loadAll();
+  }catch(e){ toast(e.message,true); }
+}
+async function addCasualty(){
+  try{
+    await api('/api/casualties',{method:'POST',body:JSON.stringify({name:c_name.value.trim(),blood_type:c_type.value})});
+    c_name.value=''; toast('伤员已登记'); loadAll();
+  }catch(e){ toast(e.message,true); }
+}
+async function addRequest(){
+  try{
+    await api('/api/requests',{method:'POST',body:JSON.stringify({
+      casualty_id:Number(r_casualty.value), blood_type:r_type.value, component:r_component.value, quantity:Number(r_qty.value)})});
+    toast('请求已提交并完成匹配'); loadAll();
+  }catch(e){ toast(e.message,true); }
+}
+async function ship(id){
+  try{ await api(`/api/requests/${id}/ship`,{method:'POST',body:'{}'}); toast('医院已实发，库存已扣减'); loadAll(); }
+  catch(e){ toast(e.message,true); }
+}
+async function cancelReq(id){
+  if(!confirm('确认取消该请求？占用将立即释放。')) return;
+  try{ await api(`/api/requests/${id}/cancel`,{method:'POST',body:JSON.stringify({reason:'页面取消'})}); toast('已取消并释放占用'); loadAll(); }
+  catch(e){ toast(e.message,true); }
+}
+async function sweep(){
+  try{ const r = await api('/api/sweep',{method:'POST',body:'{}'});
+    toast(r.released.length ? ('已释放 '+r.released.length+' 笔超时/过期占用') : '没有需要释放的占用');
+    loadAll();
+  }catch(e){ toast(e.message,true); }
+}
+async function trace(){
+  try{
+    const id = t_casualty.value; if(!id) return;
+    const data = await api(`/api/casualties/${id}/trace`);
+    document.getElementById('trace-out').textContent = JSON.stringify(data,null,2);
+  }catch(e){ toast(e.message,true); }
+}
+
+function allocLines(allocs){
+  if(!allocs || !allocs.length) return '<span class="muted">—</span>';
+  return allocs.map(a => `<div>批次${esc(a.batch_no)} · ${esc(a.hospital_name)} · ${a.quantity}袋 · <span class="tag ${a.status}">${a.status}</span></div>`).join('');
+}
+
+async function loadAll(){
+  try{
+    const [hs, cs, inv, reqs, stats] = await Promise.all([
+      api('/api/hospitals'), api('/api/casualties'), api('/api/batches'),
+      api('/api/requests'), api('/api/stats')]);
+    hospitals = hs.items; casualties = cs.items;
+
+    document.getElementById('hospitals-table').querySelector('tbody').innerHTML = hs.items.map(
+      h=>`<tr><td>${h.id}</td><td>${esc(h.code)}</td><td>${esc(h.name)}</td><td>${h.distance_km}</td></tr>`).join('')
+      || '<tr><td colspan=4 class="muted">暂无医院</td></tr>';
+    b_hospital.innerHTML = hs.items.map(h=>`<option value="${h.id}">${esc(h.name)} (${h.distance_km}km)</option>`).join('');
+
+    document.getElementById('casualties-table').querySelector('tbody').innerHTML = cs.items.map(
+      c=>`<tr><td>${c.id}</td><td>${esc(c.casualty_no)}</td><td>${esc(c.name)}</td><td>${esc(c.blood_type)}</td></tr>`).join('')
+      || '<tr><td colspan=4 class="muted">暂无伤员</td></tr>';
+    const copts = cs.items.map(c=>`<option value="${c.id}">${esc(c.name)} (${esc(c.blood_type)})</option>`).join('');
+    r_casualty.innerHTML = copts; t_casualty.innerHTML = copts;
+
+    document.getElementById('inventory-table').querySelector('tbody').innerHTML = inv.items.map(b=>
+      `<tr><td>${esc(b.batch_no)}</td><td>${esc(b.hospital_name)}</td><td>${b.blood_type}</td><td>${esc(b.component)}</td>
+      <td>${b.expires_on}</td><td>${b.quantity}</td><td>${b.held_qty}</td><td>${b.available_qty}</td><td>${b.distance_km}</td>
+      <td>${b.expired?'<span class="tag expired">过期</span>':''}</td></tr>`).join('')
+      || '<tr><td colspan=10 class="muted">暂无血袋</td></tr>';
+
+    document.getElementById('requests-table').querySelector('tbody').innerHTML = reqs.items.map(r=>
+      `<tr><td>${r.id}<br><span class="muted">${esc(r.request_no)}</span></td>
+      <td>${esc(r.casualty_no||'')} ${esc(r.casualty_name||'')}</td>
+      <td>${r.blood_type} / ${esc(r.component)}</td>
+      <td>需${r.quantity}${r.shipped_quantity?` / 发${r.shipped_quantity}`:''}</td>
+      <td><span class="tag ${r.state}">${r.state}</span>${r.held_expires_at?`<br><span class="muted">锁定至 ${r.held_expires_at.slice(11,19)}</span>`:''}</td>
+      <td>${allocLines(r.allocations)}</td>
+      <td>${r.state==='held'?`<button class="small ship" onclick="ship(${r.id})">实发扣库</button> <button class="small cancel" onclick="cancelReq(${r.id})">取消</button>`
+        : r.state==='pending'?`<button class="small cancel" onclick="cancelReq(${r.id})">取消</button>`:''}</td></tr>`).join('')
+      || '<tr><td colspan=7 class="muted">暂无请求</td></tr>';
+
+    const s = stats;
+    document.getElementById('stats').innerHTML =
+      ['pending','held','shipped','cancelled'].map(k=>`<span class="stat">${k}: ${s.requests[k]||0}</span>`).join('')
+      + `<span class="stat">在库 ${s.units_in_stock} 袋</span><span class="stat">占用 ${s.units_held}</span>`
+      + `<span class="stat">可调剂 ${s.units_shippable}</span>` + (s.expired_batches?`<span class="stat" style="background:#fadbd8;color:#c0392b">过期批次 ${s.expired_batches}</span>`:'');
+  }catch(e){ toast('加载失败：'+e.message,true); }
+}
+
+if(!b_exp.value){ b_exp.value = new Date(Date.now()+7*864e5).toISOString().slice(0,10); }
+loadAll();
+setInterval(()=>{ if(document.getElementById('autoref').checked) loadAll(); }, 5000);
 </script>
 </body>
 </html>
